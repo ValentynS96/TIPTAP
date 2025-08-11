@@ -26,13 +26,14 @@
   }
 
   function isBlock(node) {
-    return node && node.nodeType === 1 && /^(P|H1|H2|H3|H4|UL|OL|DIV)$/i.test(node.nodeName);
+    return node && node.nodeType === 1 && /^(P|H1|H2|H3|H4|UL|OL|DIV|TABLE)$/i.test(node.nodeName);
   }
 
   function isHeading(node) { return node && node.nodeType === 1 && /^(H1|H2|H3|H4)$/i.test(node.nodeName); }
   function isParagraph(node) { return node && node.nodeType === 1 && node.nodeName === 'P'; }
   function isList(node) { return node && node.nodeType === 1 && /^(UL|OL)$/i.test(node.nodeName); }
   function isListItem(node) { return node && node.nodeType === 1 && node.nodeName === 'LI'; }
+  function isTable(node) { return node && node.nodeType === 1 && node.nodeName === 'TABLE'; }
 
   function splitTextIntoWords(text) {
     // Keep whitespace as separators
@@ -48,12 +49,36 @@
   function flattenPageContents(container) {
     const blocks = [];
     const pages = Array.from(container.querySelectorAll('.page .page-content'));
-    pages.forEach(pc => {
-      Array.from(pc.childNodes).forEach(n => {
-        if (n.nodeType === 3 && n.textContent.trim() === '') { return; }
-        blocks.push(n);
-      });
-    });
+
+    const collect = (node) => {
+      if (!node) return;
+      // Text node: push only non-empty
+      if (node.nodeType === 3) {
+        if (node.textContent.trim() !== '') blocks.push(node);
+        return;
+      }
+      if (node.nodeType !== 1) return;
+
+      const tag = node.nodeName.toUpperCase();
+      // Known block-level nodes we can paginate directly
+      if (/^(P|H1|H2|H3|H4|UL|OL|TABLE)$/i.test(tag)) {
+        blocks.push(node);
+        return;
+      }
+      // Unwrap DIVs by recursively collecting their children (common for pasted content)
+      if (tag === 'DIV') {
+        Array.from(node.childNodes).forEach(collect);
+        return;
+      }
+      // For any other element, try to collect its children; if none, keep as is
+      if (node.childNodes && node.childNodes.length) {
+        Array.from(node.childNodes).forEach(collect);
+      } else {
+        blocks.push(node);
+      }
+    };
+
+    pages.forEach(pc => Array.from(pc.childNodes).forEach(collect));
     return blocks;
   }
 
@@ -192,6 +217,7 @@
     isParagraph,
     isList,
     isListItem,
+    isTable,
     splitTextIntoWords,
     cloneNodeShallow,
     flattenPageContents,

@@ -45,7 +45,8 @@
       });
 
       const paras = new Array(80).fill(0).map((_, i) => `<p>${i+1}. ${'Длинный текст '.repeat(25)}</p>`).join('');
-      editor.loadContent(`<h2>Тестовый документ</h2>${paras}`);
+      // Wrap content in a DIV to simulate pasted content wrappers
+      editor.loadContent(`<div class="pasted-wrapper"><h2>Тестовый документ</h2>${paras}</div>`);
 
       setTimeout(() => {
         const pages = document.querySelectorAll('.page');

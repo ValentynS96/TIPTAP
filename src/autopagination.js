@@ -10,6 +10,7 @@
     isParagraph,
     isList,
     isListItem,
+    isTable,
     splitTextIntoWords,
     cloneNodeShallow,
     flattenPageContents,
@@ -108,11 +109,26 @@
             currentContent.appendChild(block);
             return;
           }
+          // Place fit. If due to rounding it still overflows, move it to the next page.
           currentContent.appendChild(fit);
-          // Move rest to next page
-          currentPage = takeNextPage();
-          currentContent = currentPage.querySelector('.page-content');
-          currentContent.appendChild(rest);
+          let movedFitToNewPage = false;
+          if (!this._contentFits(currentContent)) {
+            currentContent.removeChild(fit);
+            currentPage = takeNextPage();
+            currentContent = currentPage.querySelector('.page-content');
+            currentContent.appendChild(fit);
+            movedFitToNewPage = true;
+          }
+          // Place the rest: if we already moved fit to a new page, try to keep rest with it.
+          if (rest) {
+            if (movedFitToNewPage) {
+              currentContent.appendChild(rest);
+            } else {
+              currentPage = takeNextPage();
+              currentContent = currentPage.querySelector('.page-content');
+              currentContent.appendChild(rest);
+            }
+          }
           return;
         }
 
@@ -165,33 +181,54 @@
     }
 
     _contentInnerHeight(contentEl) {
-      // Measure used height of actual content, ignoring container min-height
-      const first = contentEl.firstChild;
-      const last = contentEl.lastChild;
-      if (!first || !last) return 0;
-      const range = document.createRange();
-      try {
-        range.setStartBefore(first);
-        range.setEndAfter(last);
-      } catch (e) {
-        // Fallback: if range fails, use scrollHeight but clamp by min-height
-        const cs = window.getComputedStyle(contentEl);
-        const minH = parseFloat(cs.minHeight || '0') || 0;
-        const sh = contentEl.scrollHeight;
-        return Math.max(0, sh - minH);
+      // Measure used height of actual content relative to the content area's top.
+      // This approach captures inter-element margins and ignores container min-height.
+      const lastEl = contentEl.lastElementChild;
+      if (!lastEl) return 0;
+      const contRect = contentEl.getBoundingClientRect();
+      const lastRect = lastEl.getBoundingClientRect();
+      const used = lastRect.bottom - contRect.top;
+      return Math.max(0, Math.round(used));
+    }
+
+    _getMeasureRoot() {
+      // Create or reuse a hidden measurement container matching .page-content width and styles
+      if (!this.__measureRoot) {
+        const mr = document.createElement('div');
+        mr.style.position = 'absolute';
+        mr.style.left = '-10000px';
+        mr.style.top = '0';
+        mr.style.visibility = 'hidden';
+        mr.style.pointerEvents = 'none';
+        mr.style.whiteSpace = 'normal';
+        mr.style.overflowWrap = 'anywhere';
+        mr.style.wordBreak = 'break-word';
+        // Typography
+        mr.style.fontFamily = this.config.fontFamily || 'Arial, sans-serif';
+        mr.style.fontSize = this.config.fontSize || '12pt';
+        mr.style.lineHeight = (this.lineHeight || 24) + 'px';
+        document.body.appendChild(mr);
+        this.__measureRoot = mr;
       }
-      const rect = range.getBoundingClientRect();
-      return Math.max(0, Math.round(rect.height));
+      // Sync width with current page-content
+      const pc = this.container.querySelector('.page .page-content');
+      if (pc) {
+        const w = pc.clientWidth; // content width in px
+        if (w && Math.abs((this.__measureRoot.__w || 0) - w) > 0.5) {
+          this.__measureRoot.style.width = w + 'px';
+          this.__measureRoot.__w = w;
+        }
+      }
+      // Clear previous content
+      this.__measureRoot.innerHTML = '';
+      return this.__measureRoot;
     }
 
     _measureLines(el) {
+      const mr = this._getMeasureRoot();
       const tmp = el.cloneNode(true);
-      tmp.style.visibility = 'hidden';
-      tmp.style.position = 'absolute';
-      tmp.style.pointerEvents = 'none';
-      document.body.appendChild(tmp);
-      const h = tmp.scrollHeight;
-      document.body.removeChild(tmp);
+      mr.appendChild(tmp);
+      const h = mr.scrollHeight;
       return Math.max(1, Math.round(h / this.lineHeight));
     }
 
@@ -200,35 +237,27 @@
       const words = splitTextIntoWords(p.textContent);
       if (words.length === 0) return { fit: null, rest: null };
 
-      // Create measuring node
-      const measure = document.createElement('p');
-      measure.style.visibility = 'hidden';
-      measure.style.position = 'absolute';
-      measure.style.pointerEvents = 'none';
-      measure.style.left = '-10000px';
-      document.body.appendChild(measure);
+      const mr = this._getMeasureRoot();
 
       let lo = 1, hi = words.length, best = 0;
-      const totalMeasure = document.createElement('p');
-      totalMeasure.style.visibility = 'hidden';
-      totalMeasure.style.position = 'absolute';
-      totalMeasure.style.pointerEvents = 'none';
-      totalMeasure.style.left = '-10000px';
-      totalMeasure.textContent = words.join('');
-      document.body.appendChild(totalMeasure);
-      const totalLines = Math.max(1, Math.round(totalMeasure.scrollHeight / this.lineHeight));
-      document.body.removeChild(totalMeasure);
+      // Measure total lines first
+      const totalPara = document.createElement('p');
+      totalPara.textContent = words.join('');
+      mr.appendChild(totalPara);
+      const totalLines = Math.max(1, Math.round(mr.scrollHeight / this.lineHeight));
+      mr.innerHTML = '';
 
       if (totalLines < (minLinesPrev + minLinesNext)) {
-        document.body.removeChild(measure);
         return { fit: null, rest: null };
       }
 
       // Binary search for maximal word count that fits within maxHeight
+      const measurePara = document.createElement('p');
+      mr.appendChild(measurePara);
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
-        measure.textContent = words.slice(0, mid).join('');
-        const h = measure.scrollHeight;
+        measurePara.textContent = words.slice(0, mid).join('');
+        const h = mr.scrollHeight;
         const linesUsed = Math.max(1, Math.round(h / this.lineHeight));
         const linesRemain = totalLines - linesUsed;
         if (h <= maxHeight && linesUsed >= minLinesPrev && linesRemain >= minLinesNext) {
@@ -238,7 +267,7 @@
           hi = mid - 1;
         }
       }
-      document.body.removeChild(measure);
+      mr.innerHTML = '';
 
       if (best <= 0 || best >= words.length) {
         return { fit: null, rest: null };
@@ -258,25 +287,22 @@
       const listFit = document.createElement(listEl.nodeName);
       const listRest = document.createElement(listEl.nodeName);
 
-      // Measure by progressively adding items
-      const measure = document.createElement(listEl.nodeName);
-      measure.style.visibility = 'hidden';
-      measure.style.position = 'absolute';
-      measure.style.pointerEvents = 'none';
-      measure.style.left = '-10000px';
-      document.body.appendChild(measure);
+      // Measure by progressively adding items using the measurement root (matches page-content width/styles)
+      const mr = this._getMeasureRoot();
+      const measureList = document.createElement(listEl.nodeName);
+      mr.appendChild(measureList);
 
       let countFit = 0;
       for (let i = 0; i < items.length; i++) {
-        measure.appendChild(items[i].cloneNode(true));
-        const h = measure.scrollHeight;
+        measureList.appendChild(items[i].cloneNode(true));
+        const h = mr.scrollHeight;
         if (h <= maxHeight) {
           countFit = i + 1;
         } else {
           break;
         }
       }
-      document.body.removeChild(measure);
+      mr.innerHTML = '';
 
       if (countFit === 0) {
         // Move whole list to next page
@@ -330,11 +356,138 @@
       };
       this.container.addEventListener('keydown', this._onKeyDown);
 
+      // Normalize paste and trigger pagination immediately after paste
+      this._onPaste = (e) => this._handlePaste(e);
+      this.container.addEventListener('paste', this._onPaste);
+
       // Observe selection changes to emit current page
       document.addEventListener('selectionchange', () => {
         const cp = this._getCurrentPageNumberFromSelection();
         this._emitChange(cp);
       });
+    }
+
+    _handlePaste(e) {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      // Only process if pasting into our editor container
+      if (!this.container.contains(range.startContainer)) return;
+
+      const cd = e.clipboardData || window.clipboardData;
+      if (!cd) return;
+
+      let html = cd.getData && cd.getData('text/html');
+      let text = cd.getData && cd.getData('text/plain');
+      // If nothing to handle, let default happen
+      if (!html && !text) return;
+
+      e.preventDefault();
+
+      let normalizedHTML = '';
+      if (html && html.trim()) {
+        normalizedHTML = this._normalizePastedHTML(html);
+      } else {
+        const escape = (s) => s
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+        const lines = (text || '').split(/\r?\n/);
+        normalizedHTML = lines.map(line => {
+          const t = line.trim();
+          return t ? `<p>${escape(t)}</p>` : '<p><br></p>';
+        }).join('');
+      }
+
+      // Insert normalized HTML at caret
+      try {
+        range.deleteContents();
+        const temp = document.createElement('div');
+        temp.innerHTML = normalizedHTML;
+        let last = null;
+        while (temp.firstChild) {
+          last = temp.firstChild;
+          range.insertNode(last);
+          range.setStartAfter(last);
+          range.collapse(true);
+        }
+        // Restore selection after last inserted node
+        const after = document.createRange();
+        if (last) {
+          after.setStartAfter(last);
+          after.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(after);
+        }
+      } catch (err) {
+        console.error('Paste insertion failed', err);
+      }
+
+      // Repaginate to apply formatting and page breaks
+      this._paginateWithCaretPreserved(true);
+    }
+
+    _normalizePastedHTML(html) {
+      // Strip external styles and disallowed tags so our editor styles apply
+      const div = document.createElement('div');
+      try {
+        // Use DOMParser if available to get body only
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const body = doc && doc.body ? doc.body : null;
+        div.innerHTML = body ? body.innerHTML : html;
+      } catch (_) {
+        div.innerHTML = html;
+      }
+
+      // Remove scripts/styles/meta/link
+      div.querySelectorAll('script, style, link, meta').forEach(el => el.remove());
+      // Unwrap <font> tags
+      div.querySelectorAll('font').forEach(el => {
+        const parent = el.parentNode;
+        if (!parent) return;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        el.remove();
+      });
+      // Remove inline styles, classes, ids to enforce editor formatting
+      div.querySelectorAll('*').forEach(el => {
+        el.removeAttribute('style');
+        el.removeAttribute('class');
+        el.removeAttribute('id');
+        // Normalize images/tables attributes so CSS controls sizing
+        if (el.tagName === 'IMG') {
+          el.removeAttribute('width');
+          el.removeAttribute('height');
+          // Ensure broken imgs don't throw; leave src/alt only
+        }
+        if (el.tagName === 'TABLE' || el.tagName === 'TD' || el.tagName === 'TH') {
+          el.removeAttribute('width');
+          el.removeAttribute('height');
+          el.removeAttribute('align');
+        }
+      });
+
+      // Normalize plain text nodes at top-level into paragraphs
+      const wrapTextNodesIntoParagraphs = (root) => {
+        const nodes = Array.from(root.childNodes);
+        const toInsert = [];
+        nodes.forEach(node => {
+          if (node.nodeType === 3 && node.textContent.trim() !== '') {
+            const p = document.createElement('p');
+            p.textContent = node.textContent.trim();
+            toInsert.push({ old: node, newNode: p });
+          }
+        });
+        toInsert.forEach(({ old, newNode }) => {
+          root.insertBefore(newNode, old);
+          old.remove();
+        });
+      };
+      wrapTextNodesIntoParagraphs(div);
+
+      return div.innerHTML;
     }
 
     _getCurrentPageNumberFromSelection() {
