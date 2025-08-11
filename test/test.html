@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Тест автопагинации</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+  <style>
+    body { background: #fff; }
+    .results { position: sticky; top: 0; background: #fafafa; border-bottom: 1px solid #ddd; padding: 8px 12px; font-family: sans-serif; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <div class="results" id="results">Результаты тестов появятся здесь...</div>
+  <div class="editor-container" id="editorContainer">
+    <div class="page" data-page-number="1">
+      <div class="page-content" contenteditable="true"></div>
+    </div>
+  </div>
+
+  <script src="../src/utils.js"></script>
+  <script src="../src/debounce.js"></script>
+  <script src="../src/autopagination.js"></script>
+  <script>
+    function log(msg, ok = true) {
+      const res = document.getElementById('results');
+      const p = document.createElement('div');
+      p.textContent = (ok ? 'PASS: ' : 'FAIL: ') + msg;
+      p.className = ok ? 'pass' : 'fail';
+      res.appendChild(p);
+    }
+
+    function assert(cond, msg) { log(msg, !!cond); }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const editor = new AutoPaginationEditor({
+        container: document.getElementById('editorContainer'),
+        pageFormat: 'A4',
+        margins: { top: 25, bottom: 25, left: 30, right: 15 },
+        lineHeight: 24,
+        fontSize: '12pt',
+        fontFamily: 'Arial, sans-serif'
+      });
+
+      const paras = new Array(80).fill(0).map((_, i) => `<p>${i+1}. ${'Длинный текст '.repeat(25)}</p>`).join('');
+      editor.loadContent(`<h2>Тестовый документ</h2>${paras}`);
+
+      setTimeout(() => {
+        const pages = document.querySelectorAll('.page');
+        assert(pages.length > 1, `Документ разбит на несколько страниц: ${pages.length}`);
+        const okHeights = Array.from(pages).every(p => {
+          const pc = p.querySelector('.page-content');
+          return pc.scrollHeight <= 935 + 1; // допуск 1px
+        });
+        assert(okHeights, 'Высота содержимого каждой страницы не превышает рабочую область');
+
+        // Check headings rule: not the last element
+        let headingOk = true;
+        pages.forEach(p => {
+          const pc = p.querySelector('.page-content');
+          const last = pc.lastElementChild;
+          if (last && /^H[1-4]$/.test(last.tagName)) headingOk = false;
+        });
+        assert(headingOk, 'Заголовок не остается последним элементом на странице');
+      }, 300);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Автопагинация A4 Редактор</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="editor-wrapper">
+    <div class="toolbar">
+      <div class="left">
+        <button id="btnPageView" type="button">Страницы</button>
+        <button id="btnContinuous" type="button">Непрерывно</button>
+        <button id="btnPrintPreview" type="button">Предпросмотр</button>
+      </div>
+      <div class="center">
+        <span class="page-counter">Страница <span id="currentPage">1</span> из <span id="totalPages">1</span></span>
+      </div>
+      <div class="right">
+        <button id="btnExport" type="button">Экспорт в PDF</button>
+      </div>
+    </div>
+
+    <div class="editor-container" id="editorContainer">
+      <div class="page" data-page-number="1">
+        <div class="page-content" contenteditable="true">
+          <h2>Заголовок</h2>
+          <p>Начните печатать здесь. Этот пример демонстрирует автоматическое разбиение на страницы формата А4. Добавьте больше текста, чтобы увидеть перенос на следующую страницу. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/utils.js"></script>
+  <script src="src/debounce.js"></script>
+  <script src="src/autopagination.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const editor = new AutoPaginationEditor({
+        container: document.getElementById('editorContainer'),
+        pageFormat: 'A4',
+        margins: { top: 25, bottom: 25, left: 30, right: 15 }, // mm
+        lineHeight: 24, // px
+        fontSize: '12pt',
+        fontFamily: 'Arial, sans-serif'
+      });
+
+      // Toolbar wiring
+      document.getElementById('btnPageView').addEventListener('click', () => editor.setViewMode('page-view'));
+      document.getElementById('btnContinuous').addEventListener('click', () => editor.setViewMode('continuous'));
+      document.getElementById('btnPrintPreview').addEventListener('click', () => editor.setViewMode('print-preview'));
+      document.getElementById('btnExport').addEventListener('click', () => editor.exportToPDF());
+
+      editor.on('contentChange', (event) => {
+        document.getElementById('currentPage').textContent = String(event.currentPage || 1);
+        document.getElementById('totalPages').textContent = String(event.totalPages || 1);
+        // Also update page data attributes
+      });
+
+      // Optionally load demo long content
+      // const demo = new Array(80).fill(0).map((_, i) => `<p>${i+1}. ${'Длинный текст '.repeat(20)}</p>`).join('');
+      // editor.loadContent(`<h2>Демонстрация</h2>${demo}`);
+    });
+  </script>
+</body>
+</html>
